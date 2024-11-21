@@ -1,0 +1,509 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.sql.*;
+import java.io.*;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+
+public class ArtGalleryApp extends JFrame {
+    private JTextField usernameField;
+    private JPasswordField passwordField;
+    private JTextField titleField;
+    private JTextField artistField;
+    private JTextField yearField;
+    private JTextArea descriptionArea;
+    private JLabel imageLabel;
+    private BufferedImage artworkImage;
+    private JList<String> artworksList;
+    private DefaultListModel<String> listModel;
+
+    private Connection connection;
+
+    public ArtGalleryApp() {
+        setTitle("Art Gallery Management System");
+        setSize(800, 700);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+
+        CardLayout cardLayout = new CardLayout();
+        JPanel containerPanel = new JPanel(cardLayout);
+        setContentPane(containerPanel);
+
+        JPanel loginPanel = createLoginPanel(cardLayout);
+        JPanel mainPanel = createMainPanel(cardLayout);
+        JPanel createArtworkPanel = createCreateArtworkPanel(cardLayout);
+        JPanel viewArtworksPanel = createViewArtworksPanel(cardLayout);
+
+        containerPanel.add(loginPanel, "Login");
+        containerPanel.add(mainPanel, "Main");
+        containerPanel.add(createArtworkPanel, "Create Artwork");
+        containerPanel.add(viewArtworksPanel, "View Artworks");
+
+        cardLayout.show(containerPanel, "Login");
+
+        connectToDatabase();
+    }
+
+    private JPanel createLoginPanel(CardLayout cardLayout) {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        JPanel loginFormPanel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+
+        JLabel usernameLabel = new JLabel("Username:");
+        usernameField = new JTextField(20);
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        loginFormPanel.add(usernameLabel, gbc);
+        gbc.gridx = 1;
+        loginFormPanel.add(usernameField, gbc);
+
+        JLabel passwordLabel = new JLabel("Password:");
+        passwordField = new JPasswordField(20);
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        loginFormPanel.add(passwordLabel, gbc);
+        gbc.gridx = 1;
+        loginFormPanel.add(passwordField, gbc);
+
+        JButton loginButton = new JButton("Login");
+        loginButton.addActionListener(e -> authenticate(cardLayout));
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        gbc.gridwidth = 2;
+        loginFormPanel.add(loginButton, gbc);
+
+        panel.add(loginFormPanel, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createMainPanel(CardLayout cardLayout) {
+        JPanel panel = new JPanel(new FlowLayout());
+
+        JButton createArtworkButton = new JButton("Create Artwork");
+        JButton viewArtworksButton = new JButton("View Artworks");
+
+        panel.add(createArtworkButton);
+        panel.add(viewArtworksButton);
+
+        createArtworkButton.addActionListener(e -> cardLayout.show(getContentPane(), "Create Artwork"));
+        viewArtworksButton.addActionListener(e -> {
+            showAllArtworks();
+            cardLayout.show(getContentPane(), "View Artworks");
+        });
+
+        return panel;
+    }
+
+    private JPanel createCreateArtworkPanel(CardLayout cardLayout) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+
+        JLabel titleLabel = new JLabel("Title:");
+        titleField = new JTextField(20);
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        panel.add(titleLabel, gbc);
+        gbc.gridx = 1;
+        panel.add(titleField, gbc);
+
+        JLabel artistLabel = new JLabel("Artist:");
+        artistField = new JTextField(20);
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        panel.add(artistLabel, gbc);
+        gbc.gridx = 1;
+        panel.add(artistField, gbc);
+
+        JLabel yearLabel = new JLabel("Year:");
+        yearField = new JTextField(4);
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        panel.add(yearLabel, gbc);
+        gbc.gridx = 1;
+        panel.add(yearField, gbc);
+
+        JLabel descriptionLabel = new JLabel("Description:");
+        descriptionArea = new JTextArea(5, 20);
+        JScrollPane scrollPane = new JScrollPane(descriptionArea);
+        gbc.gridx = 0;
+        gbc.gridy = 3;
+        panel.add(descriptionLabel, gbc);
+        gbc.gridx = 1;
+        panel.add(scrollPane, gbc);
+
+        JButton uploadImageButton = new JButton("Upload Image");
+        uploadImageButton.addActionListener(e -> uploadImage());
+        gbc.gridx = 0;
+        gbc.gridy = 4;
+        panel.add(uploadImageButton, gbc);
+
+        imageLabel = new JLabel("No Image Selected");
+        imageLabel.setPreferredSize(new Dimension(200, 200));
+        gbc.gridx = 1;
+        panel.add(imageLabel, gbc);
+
+        JButton addButton = new JButton("Add Artwork");
+        addButton.addActionListener(e -> addArtwork(cardLayout));
+        gbc.gridy = 5;
+        gbc.gridwidth = 2;
+        panel.add(addButton, gbc);
+
+        JButton backButton = new JButton("Back");
+        backButton.addActionListener(e -> cardLayout.show(getContentPane(), "Main"));
+        gbc.gridy = 6;
+        panel.add(backButton, gbc);
+
+        return panel;
+    }
+
+    private JPanel createViewArtworksPanel(CardLayout cardLayout) {
+        JPanel panel = new JPanel(new BorderLayout());
+
+        listModel = new DefaultListModel<>();
+        artworksList = new JList<>(listModel);
+        JScrollPane scrollPane = new JScrollPane(artworksList);
+        panel.add(scrollPane, BorderLayout.WEST);
+
+        JPanel detailsPanel = new JPanel();
+        detailsPanel.setLayout(new BoxLayout(detailsPanel, BoxLayout.Y_AXIS));
+        detailsPanel.setBorder(BorderFactory.createTitledBorder("Artwork Details"));
+        panel.add(detailsPanel, BorderLayout.CENTER);
+
+        // Labels to display artwork details
+        JLabel titleLabel = new JLabel("Title: ");
+        JLabel artistLabel = new JLabel("Artist: ");
+        JLabel yearLabel = new JLabel("Year: ");
+        JTextArea descriptionArea = new JTextArea(5, 20);
+        descriptionArea.setEditable(false);
+        JScrollPane descriptionScroll = new JScrollPane(descriptionArea);
+
+        JLabel imageLabel = new JLabel("Image: ");
+        JPanel imagePanel = new JPanel();
+        imagePanel.add(imageLabel);
+
+        // Add the labels to the panel
+        detailsPanel.add(titleLabel);
+        detailsPanel.add(artistLabel);
+        detailsPanel.add(yearLabel);
+        detailsPanel.add(descriptionScroll);
+        detailsPanel.add(imagePanel);
+
+        // Action when an artwork is selected from the list
+        artworksList.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                String selectedTitle = artworksList.getSelectedValue();
+                if (selectedTitle != null) {
+                    try {
+                        String sql = "SELECT * FROM artworks2 WHERE title = ?";
+                        PreparedStatement statement = connection.prepareStatement(sql);
+                        statement.setString(1, selectedTitle);
+                        ResultSet resultSet = statement.executeQuery();
+
+                        if (resultSet.next()) {
+                            titleLabel.setText("Title: " + resultSet.getString("title"));
+                            artistLabel.setText("Artist: " + resultSet.getString("artist"));
+                            yearLabel.setText("Year: " + resultSet.getInt("year"));
+                            descriptionArea.setText(resultSet.getString("description"));
+
+                            // Display the image
+                            byte[] imageBytes = resultSet.getBytes("image");
+                            if (imageBytes != null) {
+                                BufferedImage image = ImageIO.read(new ByteArrayInputStream(imageBytes));
+                                imageLabel.setIcon(new ImageIcon(image.getScaledInstance(200, 200, Image.SCALE_SMOOTH)));
+                            }
+                        }
+                    } catch (SQLException | IOException ex) {
+                        ex.printStackTrace();
+                        JOptionPane.showMessageDialog(this, "Error loading artwork details.");
+                    }
+                }
+            }
+        });
+
+        // Buttons for delete and update
+        JPanel buttonPanel = new JPanel(new FlowLayout());
+
+        JButton deleteButton = new JButton("Delete Selected");
+        deleteButton.addActionListener(e -> deleteArtwork());
+
+        JButton updateButton = new JButton("Update Selected");
+        updateButton.addActionListener(e -> updateArtwork());
+
+        buttonPanel.add(deleteButton);
+        buttonPanel.add(updateButton);
+
+        panel.add(buttonPanel, BorderLayout.SOUTH);
+
+        JButton backButton = new JButton("Back to Main");
+        backButton.addActionListener(e -> cardLayout.show(getContentPane(), "Main"));
+        panel.add(backButton, BorderLayout.NORTH);
+
+        return panel;
+    }
+
+    private void connectToDatabase() {
+        try {
+            String url = "jdbc:mysql://127.0.0.1:3306/art_gallery";
+            String username = "root";
+            String password = "harish1816";
+            connection = DriverManager.getConnection(url, username, password);
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error connecting to the database.");
+        }
+    }
+
+    private void authenticate(CardLayout cardLayout) {
+        String username = usernameField.getText();
+        String password = new String(passwordField.getPassword());
+
+        if (username.equals("admin") && password.equals("password")) {
+            cardLayout.show(getContentPane(), "Main");
+        } else {
+            JOptionPane.showMessageDialog(this, "Invalid credentials.");
+        }
+    }
+
+    private void uploadImage() {
+        JFileChooser fileChooser = new JFileChooser();
+        int result = fileChooser.showOpenDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File file = fileChooser.getSelectedFile();
+            try {
+                artworkImage = ImageIO.read(file);
+                imageLabel.setIcon(new ImageIcon(artworkImage.getScaledInstance(200, 200, Image.SCALE_SMOOTH)));
+            } catch (IOException e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Error loading image.");
+            }
+        }
+    }
+
+    private void addArtwork(CardLayout cardLayout) {
+        String title = titleField.getText();
+        String artist = artistField.getText();
+        int year = Integer.parseInt(yearField.getText());
+        String description = descriptionArea.getText();
+
+        try {
+            String sql = "INSERT INTO artworks2 (title, artist, year, description, image) VALUES (?, ?, ?, ?, ?)";
+            PreparedStatement statement = connection.prepareStatement(sql);
+            statement.setString(1, title);
+            statement.setString(2, artist);
+            statement.setInt(3, year);
+            statement.setString(4, description);
+
+            if (artworkImage != null) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ImageIO.write(artworkImage, "jpg", baos);
+                byte[] imageBytes = baos.toByteArray();
+                statement.setBytes(5, imageBytes);
+            } else {
+                statement.setBytes(5, null);
+            }
+
+            statement.executeUpdate();
+            JOptionPane.showMessageDialog(this, "Artwork added successfully.");
+
+            titleField.setText("");
+            artistField.setText("");
+            yearField.setText("");
+            descriptionArea.setText("");
+            imageLabel.setIcon(null);
+            artworkImage = null;
+
+            cardLayout.show(getContentPane(), "Main");
+        } catch (SQLException | IOException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error adding artwork.");
+        }
+    }
+
+    private void showAllArtworks() {
+        listModel.clear();
+        try {
+            String sql = "SELECT title FROM artworks2";
+            PreparedStatement statement = connection.prepareStatement(sql);
+            ResultSet resultSet = statement.executeQuery();
+            while (resultSet.next()) {
+                listModel.addElement(resultSet.getString("title"));
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error loading artworks.");
+        }
+    }
+
+    private void deleteArtwork() {
+        String selectedTitle = artworksList.getSelectedValue();
+        if (selectedTitle == null) {
+            JOptionPane.showMessageDialog(this, "Please select an artwork to delete.");
+            return;
+        }
+
+        try {
+            String sql = "DELETE FROM artworks2 WHERE title = ?";
+            PreparedStatement statement = connection.prepareStatement(sql);
+            statement.setString(1, selectedTitle);
+            statement.executeUpdate();
+            JOptionPane.showMessageDialog(this, "Artwork deleted successfully.");
+            showAllArtworks();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error deleting artwork.");
+        }
+    }
+
+    // Method to show update dialog and update the artwork details in the database
+    private void updateArtwork() {
+        String selectedTitle = artworksList.getSelectedValue();
+        if (selectedTitle == null) {
+            JOptionPane.showMessageDialog(this, "Please select an artwork to update.");
+            return;
+        }
+
+        try {
+            // Fetch current artwork details
+            String sql = "SELECT * FROM artworks2 WHERE title = ?";
+            PreparedStatement statement = connection.prepareStatement(sql);
+            statement.setString(1, selectedTitle);
+            ResultSet resultSet = statement.executeQuery();
+
+            if (resultSet.next()) {
+                String currentTitle = resultSet.getString("title");
+                String currentArtist = resultSet.getString("artist");
+                int currentYear = resultSet.getInt("year");
+                String currentDescription = resultSet.getString("description");
+                byte[] currentImageBytes = resultSet.getBytes("image");
+
+                // Show dialog to update artwork
+                showUpdateDialog(currentTitle, currentArtist, currentYear, currentDescription, currentImageBytes);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error loading artwork details for update.");
+        }
+    }
+
+    private void showUpdateDialog(String currentTitle, String currentArtist, int currentYear, String currentDescription, byte[] currentImageBytes) {
+        JDialog dialog = new JDialog(this, "Update Artwork", true);
+        dialog.setSize(400, 500);
+        dialog.setLayout(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+
+        JTextField titleField = new JTextField(currentTitle, 20);
+        JTextField artistField = new JTextField(currentArtist, 20);
+        JTextField yearField = new JTextField(String.valueOf(currentYear), 4);
+        JTextArea descriptionArea = new JTextArea(currentDescription, 5, 20);
+        JScrollPane descriptionScrollPane = new JScrollPane(descriptionArea);
+
+        JButton uploadImageButton = new JButton("Upload New Image");
+        JLabel imagePreview = new JLabel("Current Image");
+
+        if (currentImageBytes != null) {
+            try {
+                BufferedImage currentImage = ImageIO.read(new ByteArrayInputStream(currentImageBytes));
+                imagePreview.setIcon(new ImageIcon(currentImage.getScaledInstance(100, 100, Image.SCALE_SMOOTH)));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        uploadImageButton.addActionListener(e -> {
+            JFileChooser fileChooser = new JFileChooser();
+            int result = fileChooser.showOpenDialog(this);
+            if (result == JFileChooser.APPROVE_OPTION) {
+                File selectedFile = fileChooser.getSelectedFile();
+                try {
+                    BufferedImage newImage = ImageIO.read(selectedFile);
+                    artworkImage = newImage;
+                    imagePreview.setIcon(new ImageIcon(newImage.getScaledInstance(100, 100, Image.SCALE_SMOOTH)));
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        });
+
+        JButton saveButton = new JButton("Save");
+        saveButton.addActionListener(e -> {
+            String updatedTitle = titleField.getText();
+            String updatedArtist = artistField.getText();
+            int updatedYear = Integer.parseInt(yearField.getText());
+            String updatedDescription = descriptionArea.getText();
+
+            try {
+                String sql = "UPDATE artworks2 SET title = ?, artist = ?, year = ?, description = ?, image = ? WHERE title = ?";
+                PreparedStatement statement = connection.prepareStatement(sql);
+                statement.setString(1, updatedTitle);
+                statement.setString(2, updatedArtist);
+                statement.setInt(3, updatedYear);
+                statement.setString(4, updatedDescription);
+
+                if (artworkImage != null) {
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    ImageIO.write(artworkImage, "jpg", baos);
+                    statement.setBytes(5, baos.toByteArray());
+                } else {
+                    statement.setBytes(5, currentImageBytes);
+                }
+
+                statement.setString(6, currentTitle);
+                statement.executeUpdate();
+                JOptionPane.showMessageDialog(dialog, "Artwork updated successfully.");
+                dialog.dispose();
+                showAllArtworks();
+            } catch (SQLException | IOException ex) {
+                ex.printStackTrace();
+                JOptionPane.showMessageDialog(dialog, "Error updating artwork.");
+            }
+        });
+
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        dialog.add(new JLabel("Title:"), gbc);
+        gbc.gridx = 1;
+        dialog.add(titleField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        dialog.add(new JLabel("Artist:"), gbc);
+        gbc.gridx = 1;
+        dialog.add(artistField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 2;
+        dialog.add(new JLabel("Year:"), gbc);
+        gbc.gridx = 1;
+        dialog.add(yearField, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 3;
+        dialog.add(new JLabel("Description:"), gbc);
+        gbc.gridx = 1;
+        dialog.add(descriptionScrollPane, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 4;
+        dialog.add(uploadImageButton, gbc);
+        gbc.gridx = 1;
+        dialog.add(imagePreview, gbc);
+
+        gbc.gridx = 0;
+        gbc.gridy = 5;
+        gbc.gridwidth = 2;
+        dialog.add(saveButton, gbc);
+
+        dialog.setVisible(true);
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            ArtGalleryApp app = new ArtGalleryApp();
+            app.setVisible(true);
+        });
+    }
+}
